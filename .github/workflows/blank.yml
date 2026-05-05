@@ -1,0 +1,400 @@
+<!DOCTYPE html>
+<html>
+<head>
+<title>8 Bit Collector Ultimate</title>
+
+<style>
+body {
+  margin: 0;
+  background: black;
+  overflow: hidden;
+  font-family: monospace;
+  color: white;
+}
+
+#score, #highScore {
+  position: absolute;
+  left: 10px;
+  font-size: 20px;
+}
+
+#score { top: 10px; }
+#highScore { top: 35px; }
+
+#lives {
+  position: absolute;
+  left: 10px;
+  top: 60px;
+  display: flex;
+  gap: 4px;
+}
+
+#gameOver {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  font-size: 40px;
+  display: none;
+  text-align: center;
+}
+
+#shop {
+  position: absolute;
+  top: 100px;
+  left: 10px;
+  display: none;
+  background: rgba(0,0,0,0.85);
+  padding: 10px;
+  border: 2px solid white;
+}
+
+#moneyFlash {
+  position: absolute;
+  top: 40%;
+  width: 100%;
+  text-align: center;
+  font-size: 60px;
+  color: gold;
+  display: none;
+  text-shadow: 0 0 10px yellow;
+}
+
+canvas {
+  display: block;
+}
+</style>
+</head>
+
+<body>
+
+<div id="score">Score: 0</div>
+<div id="highScore">High Score: 0</div>
+<div id="lives"></div>
+
+<div id="gameOver">GAME OVER<br><small>Press R</small></div>
+
+<div id="shop">
+  <div>UPGRADES (U)</div>
+  <button onclick="buySpeed()">Speed +1 (5)</button><br>
+  <button onclick="buyMult()">Points +1 (20)</button><br>
+  <button onclick="buyMoneyTime()">MONEY TIME!!! (55)</button>
+</div>
+
+<div id="moneyFlash">MONEY TIME!!!</div>
+
+<canvas id="game"></canvas>
+
+<script>
+
+// ================= CANVAS =================
+const c = document.getElementById("game");
+const ctx = c.getContext("2d");
+c.width = innerWidth;
+c.height = innerHeight;
+
+// ================= AUDIO =================
+const audio = new (window.AudioContext || window.webkitAudioContext)();
+
+function sound(t){
+  let o=audio.createOscillator();
+  let g=audio.createGain();
+
+  o.connect(g); g.connect(audio.destination);
+
+  if(t==="collect"){o.type="square";o.frequency.value=800;}
+  if(t==="hit"){o.type="sawtooth";o.frequency.value=150;}
+  if(t==="upgrade"){o.type="triangle";o.frequency.value=500;}
+
+  g.gain.value=0.2;
+  g.gain.exponentialRampToValueAtTime(0.01,audio.currentTime+0.2);
+
+  o.start(); o.stop(audio.currentTime+0.2);
+}
+
+// ================= GAME STATE =================
+let player={x:100,y:100,size:20,speed:4};
+
+let point={x:Math.random()*c.width,y:Math.random()*c.height,size:10};
+let bonusPoints=[];
+
+let enemies=[];
+let powerUps=[];
+let keys={};
+
+let score=0;
+let highScore=localStorage.getItem("hs")||0;
+
+let lives=3;
+let inv=0;
+let shake=0;
+
+let shield=false;
+let freeze=0;
+let boost=0;
+let pointVal=1;
+
+let shop=false;
+let dead=false;
+
+document.getElementById("highScore").innerText="High Score: "+highScore;
+
+// ================= INPUT =================
+document.addEventListener("keydown",e=>{
+  keys[e.key]=true;
+  audio.resume();
+
+  if(e.key==="u"){
+    shop=!shop;
+    document.getElementById("shop").style.display=shop?"block":"none";
+  }
+
+  if(e.key==="r") reset();
+});
+
+document.addEventListener("keyup",e=>keys[e.key]=false);
+
+// ================= HEARTS =================
+function hearts(){
+  let d=document.getElementById("lives");
+  d.innerHTML="";
+  for(let i=0;i<lives;i++){
+    let h=document.createElement("span");
+    h.innerText="♥";
+    h.style.color="red";
+    d.appendChild(h);
+  }
+}
+
+// ================= RESET =================
+function reset(){
+  player={x:100,y:100,size:20,speed:4};
+  score=0; lives=3;
+  enemies=[]; powerUps=[]; bonusPoints=[];
+  shield=false; freeze=0; boost=0;
+  inv=0; shake=0;
+  dead=false;
+
+  point.x=Math.random()*c.width;
+  point.y=Math.random()*c.height;
+
+  document.getElementById("gameOver").style.display="none";
+  hearts(); updateScore();
+}
+
+// ================= ENEMY =================
+function spawnEnemy(){
+  enemies.push({
+    x:Math.random()*c.width,
+    y:Math.random()*c.height,
+    size:15,
+    speed:1+Math.random()*2,
+    a:Math.random()*Math.PI*2
+  });
+}
+
+// ================= POWERUPS =================
+function spawnPU(){
+  let t=["shield","freeze","boost","bomb"];
+  powerUps.push({
+    x:Math.random()*c.width,
+    y:Math.random()*c.height,
+    size:12,
+    type:t[Math.random()*4|0]
+  });
+}
+
+// ================= MONEY TIME =================
+function buyMoneyTime(){
+  if(score>=55){
+    score-=55;
+    updateScore();
+    sound("upgrade");
+
+    // FLASH TEXT
+    let f=document.getElementById("moneyFlash");
+    f.style.display="block";
+
+    setTimeout(()=>f.style.display="none",800);
+
+    // SPAWN LOTS OF POINTS
+    for(let i=0;i<40;i++){
+      bonusPoints.push({
+        x:Math.random()*c.width,
+        y:Math.random()*c.height,
+        size:8
+      });
+    }
+  }
+}
+
+// ================= OTHER UPGRADES =================
+function buySpeed(){if(score>=5){score-=5;player.speed++;sound("upgrade");updateScore();}}
+function buyMult(){if(score>=20){score-=20;pointVal++;sound("upgrade");updateScore();}}
+
+// ================= SCORE =================
+function updateScore(){
+  document.getElementById("score").innerText="Score: "+score;
+  if(score>highScore){
+    highScore=score;
+    localStorage.setItem("hs",score);
+    document.getElementById("highScore").innerText="High Score: "+highScore;
+  }
+}
+
+// ================= UPDATE =================
+function update(){
+
+  if(dead) return;
+
+  if(freeze>0) freeze--;
+  if(inv>0) inv--;
+  if(shake>0) shake--;
+  if(boost>0) boost--;
+
+  if(shop) return;
+
+  let sp=player.speed+(boost>0?3:0);
+
+  if(keys.ArrowUp) player.y-=sp;
+  if(keys.ArrowDown) player.y+=sp;
+  if(keys.ArrowLeft) player.x-=sp;
+  if(keys.ArrowRight) player.x+=sp;
+
+  // BOUNDS
+  if(player.x<0) player.x=0;
+  if(player.y<0) player.y=0;
+  if(player.x+player.size>c.width) player.x=c.width-player.size;
+  if(player.y+player.size>c.height) player.y=c.height-player.size;
+
+  // MAIN POINT
+  if(player.x<point.x+point.size&&player.x+player.size>point.x&&player.y<point.y+point.size&&player.y+player.size>point.y){
+    score+=pointVal;
+    sound("collect");
+
+    point.x=Math.random()*c.width;
+    point.y=Math.random()*c.height;
+
+    if(score%5===0){
+      spawnEnemy();
+      if(Math.random()<0.6) spawnPU();
+    }
+
+    updateScore();
+  }
+
+  // BONUS POINTS (MONEY TIME)
+  bonusPoints = bonusPoints.filter(p=>{
+    let hit=player.x<p.x+p.size&&player.x+player.size>p.x&&player.y<p.y+p.size&&player.y+player.size>p.y;
+
+    if(!hit) return true;
+
+    score+=1;
+    sound("collect");
+    updateScore();
+    return false;
+  });
+
+  // POWERUPS
+  powerUps=powerUps.filter(p=>{
+    let hit=player.x<p.x+p.size&&player.x+player.size>p.x&&player.y<p.y+p.size&&player.y+player.size>p.y;
+
+    if(!hit) return true;
+
+    if(p.type==="shield") shield=true;
+    if(p.type==="freeze") freeze=180;
+    if(p.type==="boost") boost=180;
+    if(p.type==="bomb") enemies=[];
+
+    sound("upgrade");
+    return false;
+  });
+
+  // ENEMIES
+  enemies.forEach(e=>{
+    if(freeze>0) return;
+
+    let dx=player.x-e.x,dy=player.y-e.y;
+    let d=Math.sqrt(dx*dx+dy*dy);
+
+    e.x+=(dx/d)*e.speed;
+    e.y+=(dy/d)*e.speed;
+
+    e.a+=0.05;
+    e.x+=Math.cos(e.a)*0.5;
+    e.y+=Math.sin(e.a)*0.5;
+
+    if(inv===0 &&
+      player.x<e.x+e.size&&player.x+player.size>e.x&&player.y<e.y+e.size&&player.y+player.size>e.y){
+
+      if(shield){
+        shield=false;
+        inv=30;
+        shake=10;
+        sound("hit");
+        return;
+      }
+
+      lives--;
+      hearts();
+      sound("hit");
+
+      inv=60;
+      shake=15;
+
+      if(lives<=0){
+        dead=true;
+        document.getElementById("gameOver").style.display="block";
+      } else {
+        player.x=100;
+        player.y=100;
+      }
+    }
+  });
+}
+
+// ================= DRAW =================
+function draw(){
+  ctx.save();
+
+  if(shake>0){
+    ctx.translate((Math.random()-0.5)*10,(Math.random()-0.5)*10);
+  }
+
+  ctx.fillStyle="black";
+  ctx.fillRect(0,0,c.width,c.height);
+
+  ctx.fillStyle="yellow";
+  ctx.fillRect(point.x,point.y,point.size,point.size);
+
+  ctx.fillStyle="orange";
+  bonusPoints.forEach(p=>ctx.fillRect(p.x,p.y,p.size,p.size));
+
+  ctx.fillStyle="cyan";
+  powerUps.forEach(p=>ctx.fillRect(p.x,p.y,p.size,p.size));
+
+  ctx.fillStyle="red";
+  enemies.forEach(e=>ctx.fillRect(e.x,e.y,e.size,e.size));
+
+  ctx.fillStyle="lime";
+  ctx.fillRect(player.x,player.y,player.size,player.size);
+
+  ctx.restore();
+}
+
+// ================= LOOP =================
+function loop(){
+  update();
+  draw();
+  requestAnimationFrame(loop);
+}
+
+hearts();
+loop();
+
+</script>
+
+</body>
+</html>
+
+
